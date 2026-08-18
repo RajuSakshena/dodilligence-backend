@@ -1,6 +1,7 @@
 // server.js
 require('dotenv').config();
 
+const path = require('path');
 const express = require('express');
 const cors = require('cors');
 const crypto = require('crypto');
@@ -91,6 +92,23 @@ function isValidUUID(value) {
   return typeof value === 'string' && UUID_REGEX.test(value);
 }
 
+// -----------------------------------------------------------------------
+// ⚠️  ADMIN ROUTES HAVE NO AUTHENTICATION — TEMPORARY / DEV-ONLY  ⚠️
+// -----------------------------------------------------------------------
+// At the caller's explicit request, requireAdminAuth and all Basic Auth
+// logic have been removed. GET/DELETE /api/admin/submissions and
+// GET /management.html below are reachable by ANYONE who knows (or
+// guesses) the URL — no username, password, token, or session required.
+//
+// Concretely, that means:
+//   - Every field of every submission (org name, email, contact details,
+//     foreign-funding info, etc.) is publicly readable.
+//   - Anyone can permanently delete any or all submissions.
+//
+// This should not be exposed on a public Render URL without re-adding
+// some form of access control first (Basic Auth, a shared-secret header,
+// IP allowlisting, etc.).
+// -----------------------------------------------------------------------
 // -----------------------------------------------------------------------
 // Routes
 // -----------------------------------------------------------------------
@@ -262,6 +280,61 @@ app.get('/api/submissions/:id', async (req, res) => {
     console.error('GET /api/submissions/:id error:', err.message);
     return res.status(500).json({ error: 'Failed to fetch submission.' });
   }
+});
+
+// -----------------------------------------------------------------------
+// Admin routes — NO authentication (see warning above).
+// These are the only routes allowed to return every column/row, and the
+// only routes allowed to delete a submission. They still only ever touch
+// the single assessment_submissions table, using parameterised SQL, and
+// never accept a table or column name from the client.
+// -----------------------------------------------------------------------
+
+// ---- GET /api/admin/submissions ----------------------------------------
+// Returns every column for every row, newest first. PUBLIC — no auth.
+app.get('/api/admin/submissions', async (req, res) => {
+  try {
+    const rows = await sql.query(
+      `SELECT * FROM ${TABLE} ORDER BY created_at DESC`
+    );
+    return res.json(rows);
+  } catch (err) {
+    console.error('GET /api/admin/submissions error:', err.message);
+    return res.status(500).json({ error: 'Failed to fetch submissions.' });
+  }
+});
+
+// ---- DELETE /api/admin/submissions/:id ----------------------------------
+// Permanently deletes one row by UUID. PUBLIC — no auth.
+app.delete('/api/admin/submissions/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!isValidUUID(id)) {
+      return res.status(400).json({ error: 'Invalid submission id (must be a UUID).' });
+    }
+
+    const rows = await sql.query(
+      `DELETE FROM ${TABLE} WHERE id = $1 RETURNING id`,
+      [id]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ error: `No submission found with id ${id}.` });
+    }
+
+    return res.json({ success: true, deletedId: rows[0].id });
+  } catch (err) {
+    console.error('DELETE /api/admin/submissions/:id error:', err.message);
+    return res.status(500).json({ error: 'Failed to delete submission.' });
+  }
+});
+
+// ---- GET /management.html -----------------------------------------------
+// The admin dashboard itself. PUBLIC — no auth. Anyone with this URL can
+// view and delete every submission.
+app.get('/management.html', (req, res) => {
+  res.sendFile(path.join(__dirname, 'management.html'));
 });
 
 // -----------------------------------------------------------------------
