@@ -1322,51 +1322,120 @@
     confirmOverlay.classList.add('open');
   }
 
+  let isDeleting = false;
+
   function closeConfirm() {
+    // Never close (or clear pendingDeleteId) while a delete request is in flight.
+    if (isDeleting) return;
     confirmOverlay.classList.remove('open');
     pendingDeleteId = null;
   }
 
+  function removeSubmissionFromState(id) {
+    submissions = submissions.filter((s) => String(s.id) !== String(id));
+    populateFilterOptions();
+    applyFilters();
+    renderSummary();
+  }
+
   async function performDelete() {
-    if (!pendingDeleteId) return;
+    // Guard against double-clicks / re-entry while a request is already running.
+    if (!pendingDeleteId || isDeleting) return;
+
+    // Snapshot the id locally so it can't be lost even if pendingDeleteId
+    // is touched elsewhere before the request completes.
     const id = pendingDeleteId;
+    isDeleting = true;
 
     confirmDeleteBtn.disabled = true;
+    confirmCancelBtn.disabled = true;
     confirmDeleteBtn.textContent = 'Deleting…';
 
+    // Always hit the same origin that served this page, so the request
+    // never accidentally goes to a different deployment/backend.
+    const deleteUrl = `${window.location.origin}/api/admin/submissions/${encodeURIComponent(id)}`;
+
+    let res = null;
+    let bodyText = '';
+    let bodyJson = null;
+
     try {
-      const res = await fetch(`/api/admin/submissions/${encodeURIComponent(id)}`, {
+      res = await fetch(deleteUrl, {
         method: 'DELETE',
+        headers: {
+          'Accept': 'application/json',
+        },
+      });
+
+      // Read the body safely — it may be empty, plain text, or JSON.
+      try {
+        bodyText = await res.text();
+      } catch (readErr) {
+        bodyText = '';
+      }
+
+      if (bodyText) {
+        try {
+          bodyJson = JSON.parse(bodyText);
+        } catch (parseErr) {
+          bodyJson = null;
+        }
+      }
+
+      const serverMessage = bodyJson && (bodyJson.error || bodyJson.message)
+        ? (bodyJson.error || bodyJson.message)
+        : null;
+
+      if (res.ok) {
+        removeSubmissionFromState(id);
+        toast('Submission deleted successfully.', 'success');
+        pendingDeleteId = null;
+        isDeleting = false;
+        confirmOverlay.classList.remove('open');
+        return;
+      }
+
+      // Non-OK response: log full detail and surface the real backend response.
+      console.error('Failed to delete submission:', {
+        status: res.status,
+        url: deleteUrl,
+        body: bodyText,
       });
 
       if (res.status === 401) {
-        toast('Authentication required. Please reload the page and sign in.', 'error');
+        toast(serverMessage || 'Unauthorized: DELETE request was rejected by the server.', 'error');
+      } else if (res.status === 403) {
+        toast(serverMessage || 'Forbidden: DELETE request was rejected by the server.', 'error');
+      } else if (res.status === 404) {
+        // The row is already gone server-side — reflect that in the UI.
+        removeSubmissionFromState(id);
+        toast(serverMessage || 'Submission not found; it may already have been deleted.', 'error');
+        pendingDeleteId = null;
+        isDeleting = false;
+        confirmOverlay.classList.remove('open');
         return;
+      } else {
+        const statusText = (res.statusText || '').trim();
+        const fallback = `Server error (${res.status}${statusText ? ' ' + statusText : ''}).`;
+        toast(serverMessage || (bodyText ? `Server error (${res.status}): ${bodyText}` : fallback), 'error');
       }
-
-      if (res.status === 404) {
-        toast('That submission no longer exists.', 'error');
-        submissions = submissions.filter((s) => String(s.id) !== String(id));
-        populateFilterOptions();
-        applyFilters();
-        renderSummary();
-        return;
-      }
-
-      if (!res.ok) throw new Error(`Server responded with ${res.status}`);
-
-      submissions = submissions.filter((s) => String(s.id) !== String(id));
-      populateFilterOptions();
-      applyFilters();
-      renderSummary();
-      toast('Submission deleted successfully.', 'success');
     } catch (err) {
-      console.error('Failed to delete submission:', err);
-      toast('Failed to delete submission. Please try again.', 'error');
+      // Network-level failure (e.g. request never reached the server).
+      console.error('Failed to delete submission:', {
+        status: res ? res.status : 'network error',
+        url: deleteUrl,
+        body: bodyText,
+        error: err,
+      });
+      toast(`Failed to delete submission: ${err.message || 'network error'}`, 'error');
     } finally {
+      isDeleting = false;
       confirmDeleteBtn.disabled = false;
+      confirmCancelBtn.disabled = false;
       confirmDeleteBtn.innerHTML = 'Delete permanently';
-      closeConfirm();
+      // Only close here on the error paths that didn't already return above;
+      // the modal stays open so the user sees the toast in context, but is
+      // no longer blocked from cancelling.
     }
   }
 
