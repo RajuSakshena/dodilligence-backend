@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>DoDiligence Management</title>
+<!--
+  ⚠️ NO AUTHENTICATION. This page and the /api/admin/* endpoints it calls
+  are publicly reachable by anyone who has the URL — there is no login,
+  password, or token. This is intended as a temporary/dev-only setup;
+  do not deploy it to a public URL without adding access control back in.
+-->
+<style>
+  :root {
+    --bg: #f4f5f7;
+    --panel: #ffffff;
+    --border: #e2e4e9;
+    --text: #1c1e21;
+    --muted: #6b7280;
+    --accent: #2952e3;
+    --accent-dark: #1e3ea8;
+    --danger: #d33;
+    --danger-dark: #a02020;
+    --radius: 8px;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+
+  header {
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    padding: 20px 32px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  header h1 {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 700;
+  }
+
+  header .stats {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+  }
+
+  .count-badge {
+    background: #eef1fd;
+    color: var(--accent-dark);
+    font-weight: 600;
+    padding: 6px 14px;
+    border-radius: 999px;
+    font-size: 14px;
+  }
+
+  button {
+    cursor: pointer;
+    border: none;
+    border-radius: var(--radius);
+    font-size: 14px;
+    font-weight: 600;
+    padding: 8px 16px;
+    transition: background 0.15s ease;
+  }
+
+  .btn-primary {
+    background: var(--accent);
+    color: #fff;
+  }
+  .btn-primary:hover { background: var(--accent-dark); }
+
+  .btn-secondary {
+    background: #eef0f3;
+    color: var(--text);
+  }
+  .btn-secondary:hover { background: #dfe2e7; }
+
+  .btn-danger {
+    background: #fdecec;
+    color: var(--danger);
+  }
+  .btn-danger:hover { background: var(--danger); color: #fff; }
+
+  main {
+    padding: 24px 32px 64px;
+    max-width: 1400px;
+    margin: 0 auto;
+  }
+
+  #message {
+    display: none;
+    margin-bottom: 16px;
+    padding: 10px 16px;
+    border-radius: var(--radius);
+    font-size: 14px;
+    font-weight: 500;
+  }
+  #message.success { display: block; background: #e8f8ee; color: #1a7a3e; }
+  #message.error { display: block; background: #fdecec; color: var(--danger-dark); }
+
+  .table-wrapper {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow-x: auto;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+
+  th, td {
+    text-align: left;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+
+  th {
+    background: #fafbfc;
+    color: var(--muted);
+    text-transform: uppercase;
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    position: sticky;
+    top: 0;
+  }
+
+  tbody tr:hover { background: #fafbff; }
+
+  td.actions-cell {
+    display: flex;
+    gap: 8px;
+  }
+
+  .tier-badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    background: #eef1fd;
+    color: var(--accent-dark);
+  }
+
+  .empty-state, .loading-state {
+    padding: 48px;
+    text-align: center;
+    color: var(--muted);
+  }
+
+  /* Modal */
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(20, 22, 30, 0.55);
+    align-items: flex-start;
+    justify-content: center;
+    padding: 40px 16px;
+    overflow-y: auto;
+    z-index: 100;
+  }
+  .modal-overlay.open { display: flex; }
+
+  .modal {
+    background: var(--panel);
+    border-radius: var(--radius);
+    width: 100%;
+    max-width: 800px;
+    max-height: 100%;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .modal-header {
+    padding: 18px 24px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .modal-header h2 {
+    margin: 0;
+    font-size: 17px;
+  }
+
+  .modal-close {
+    background: none;
+    color: var(--muted);
+    font-size: 20px;
+    padding: 4px 8px;
+  }
+  .modal-close:hover { color: var(--text); background: #eef0f3; }
+
+  .modal-body {
+    padding: 20px 24px;
+    overflow-y: auto;
+  }
+
+  .field-grid {
+    display: grid;
+    grid-template-columns: 220px 1fr;
+    row-gap: 10px;
+    column-gap: 16px;
+    font-size: 13px;
+  }
+
+  .field-grid dt {
+    color: var(--muted);
+    font-weight: 600;
+    word-break: break-word;
+  }
+
+  .field-grid dd {
+    margin: 0;
+    word-break: break-word;
+  }
+
+  .field-grid dd pre {
+    background: #f6f7f9;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 12px;
+    font-size: 12px;
+    overflow-x: auto;
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  /* Confirm dialog */
+  .confirm-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(20, 22, 30, 0.55);
+    align-items: center;
+    justify-content: center;
+    z-index: 200;
+  }
+  .confirm-overlay.open { display: flex; }
+
+  .confirm-box {
+    background: var(--panel);
+    border-radius: var(--radius);
+    padding: 24px;
+    max-width: 420px;
+    width: 90%;
+  }
+
+  .confirm-box p { font-size: 14px; line-height: 1.5; }
+  .confirm-box .sub { color: var(--muted); font-size: 13px; }
+
+  .confirm-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 20px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>DoDiligence Management</h1>
+  <div class="stats">
+    <span class="count-badge" id="countBadge">0 submissions</span>
+    <button class="btn-secondary" id="refreshBtn">⟳ Refresh</button>
+  </div>
+</header>
+
+<main>
+  <div id="message"></div>
+
+  <div class="table-wrapper">
+    <table>
+      <thead>
+        <tr>
+          <th>Organisation</th>
+          <th>Email</th>
+          <th>Registration Type</th>
+          <th>Primary Role</th>
+          <th>State</th>
+          <th>City</th>
+          <th>Overall Score</th>
+          <th>Tier</th>
+          <th>Created At</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="tableBody">
+        <tr><td colspan="10" class="loading-state">Loading submissions…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</main>
+
+<!-- Detail modal -->
+<div class="modal-overlay" id="detailOverlay">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 id="detailTitle">Submission details</h2>
+      <button class="modal-close" id="detailCloseBtn">&times;</button>
+    </div>
+    <div class="modal-body">
+      <dl class="field-grid" id="detailFields"></dl>
+    </div>
+  </div>
+</div>
+
+<!-- Delete confirmation -->
+<div class="confirm-overlay" id="confirmOverlay">
+  <div class="confirm-box">
+    <p><strong>Are you sure you want to permanently delete this submission?</strong></p>
+    <p class="sub" id="confirmDetails"></p>
+    <div class="confirm-actions">
+      <button class="btn-secondary" id="confirmCancelBtn">Cancel</button>
+      <button class="btn-danger" id="confirmDeleteBtn">Delete permanently</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  // All columns, in the order they should appear in the detail modal.
+  const ALL_COLUMNS = [
+    'id', 'org_name', 'registration_type', 'primary_role', 'state', 'city',
+    'year_established', 'email', 'contact_details', 'foreign_funds',
+    'confidentiality_accepted', 'answers', 'current_section_index',
+    'completed_sections', 'overall_score', 'tier', 'parameter_scores',
+    'red_flags', 'csr_ineligible', 'gift_email', 'gift_role', 'connect_slot',
+    'connect_agenda', 'connect_share_report', 'shared_with_email',
+    'created_at', 'updated_at',
+  ];
+
+  const JSONB_FIELDS = new Set([
+    'answers', 'completed_sections', 'parameter_scores', 'red_flags',
+  ]);
+
+  let submissions = [];
+  let pendingDeleteId = null;
+
+  const tableBody = document.getElementById('tableBody');
+  const countBadge = document.getElementById('countBadge');
+  const messageEl = document.getElementById('message');
+  const refreshBtn = document.getElementById('refreshBtn');
+
+  const detailOverlay = document.getElementById('detailOverlay');
+  const detailTitle = document.getElementById('detailTitle');
+  const detailFields = document.getElementById('detailFields');
+  const detailCloseBtn = document.getElementById('detailCloseBtn');
+
+  const confirmOverlay = document.getElementById('confirmOverlay');
+  const confirmDetails = document.getElementById('confirmDetails');
+  const confirmCancelBtn = document.getElementById('confirmCancelBtn');
+  const confirmDeleteBtn = document.getElementById('confirmDeleteBtn');
+
+  function showMessage(text, type) {
+    messageEl.textContent = text;
+    messageEl.className = type; // 'success' or 'error'
+    setTimeout(() => {
+      messageEl.className = '';
+      messageEl.textContent = '';
+    }, 4000);
+  }
+
+  function escapeHtml(str) {
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  }
+
+  function formatDate(value) {
+    if (!value) return '—';
+    const d = new Date(value);
+    if (isNaN(d.getTime())) return String(value);
+    return d.toLocaleString();
+  }
+
+  function formatValue(key, value) {
+    if (value === null || value === undefined || value === '') return '—';
+    if (JSONB_FIELDS.has(key)) {
+      return `<pre>${escapeHtml(JSON.stringify(value, null, 2))}</pre>`;
+    }
+    if (key === 'created_at' || key === 'updated_at') {
+      return escapeHtml(formatDate(value));
+    }
+    if (typeof value === 'boolean') {
+      return value ? 'true' : 'false';
+    }
+    return escapeHtml(String(value));
+  }
+
+  // ---- Fetch & render the submissions table -----------------------------
+  // Relative URL: works both locally and once deployed on Render, since
+  // the page and the admin API share the same origin. The browser
+  // automatically attaches the Basic Auth credentials it already used to
+  // load this page.
+  async function loadSubmissions() {
+    tableBody.innerHTML = '<tr><td colspan="10" class="loading-state">Loading submissions…</td></tr>';
+    try {
+      const res = await fetch('/api/admin/submissions');
+      if (res.status === 401) {
+        showMessage('Authentication required. Please reload the page and sign in.', 'error');
+        tableBody.innerHTML = '<tr><td colspan="10" class="empty-state">Not authenticated.</td></tr>';
+        return;
+      }
+      if (!res.ok) {
+        throw new Error(`Server responded with ${res.status}`);
+      }
+      submissions = await res.json();
+      renderTable();
+    } catch (err) {
+      console.error('Failed to load submissions:', err);
+      showMessage('Failed to load submissions. Please try refreshing.', 'error');
+      tableBody.innerHTML = '<tr><td colspan="10" class="empty-state">Could not load data.</td></tr>';
+    }
+  }
+
+  function renderTable() {
+    countBadge.textContent = `${submissions.length} submission${submissions.length === 1 ? '' : 's'}`;
+
+    if (submissions.length === 0) {
+      tableBody.innerHTML = '<tr><td colspan="10" class="empty-state">No submissions yet.</td></tr>';
+      return;
+    }
+
+    tableBody.innerHTML = submissions.map((row) => `
+      <tr data-id="${escapeHtml(row.id)}">
+        <td>${escapeHtml(row.org_name || '—')}</td>
+        <td>${escapeHtml(row.email || '—')}</td>
+        <td>${escapeHtml(row.registration_type || '—')}</td>
+        <td>${escapeHtml(row.primary_role || '—')}</td>
+        <td>${escapeHtml(row.state || '—')}</td>
+        <td>${escapeHtml(row.city || '—')}</td>
+        <td>${row.overall_score ?? '—'}</td>
+        <td>${row.tier ? `<span class="tier-badge">${escapeHtml(row.tier)}</span>` : '—'}</td>
+        <td>${escapeHtml(formatDate(row.created_at))}</td>
+        <td class="actions-cell">
+          <button class="btn-secondary view-btn" data-id="${escapeHtml(row.id)}">View</button>
+          <button class="btn-danger delete-btn" data-id="${escapeHtml(row.id)}">Delete</button>
+        </td>
+      </tr>
+    `).join('');
+  }
+
+  // ---- View modal ---------------------------------------------------------
+  function openDetail(id) {
+    const row = submissions.find((s) => s.id === id);
+    if (!row) return;
+
+    detailTitle.textContent = row.org_name ? `${row.org_name}` : 'Submission details';
+
+    detailFields.innerHTML = ALL_COLUMNS.map((key) => `
+      <dt>${escapeHtml(key)}</dt>
+      <dd>${formatValue(key, row[key])}</dd>
+    `).join('');
+
+    detailOverlay.classList.add('open');
+  }
+
+  function closeDetail() {
+    detailOverlay.classList.remove('open');
+  }
+
+  // ---- Delete flow ----------------------------------------------------
+  function openConfirm(id) {
+    const row = submissions.find((s) => s.id === id);
+    if (!row) return;
+    pendingDeleteId = id;
+    confirmDetails.textContent = `Organisation: ${row.org_name || '—'}  •  ID: ${id}`;
+    confirmOverlay.classList.add('open');
+  }
+
+  function closeConfirm() {
+    confirmOverlay.classList.remove('open');
+    pendingDeleteId = null;
+  }
+
+  async function performDelete() {
+    if (!pendingDeleteId) return;
+    const id = pendingDeleteId;
+
+    confirmDeleteBtn.disabled = true;
+    confirmDeleteBtn.textContent = 'Deleting…';
+
+    try {
+      const res = await fetch(`/api/admin/submissions/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      });
+
+      if (res.status === 401) {
+        showMessage('Authentication required. Please reload the page and sign in.', 'error');
+        return;
+      }
+
+      if (res.status === 404) {
+        showMessage('That submission no longer exists.', 'error');
+        submissions = submissions.filter((s) => s.id !== id);
+        renderTable();
+        return;
+      }
+
+      if (!res.ok) {
+        throw new Error(`Server responded with ${res.status}`);
+      }
+
+      submissions = submissions.filter((s) => s.id !== id);
+      renderTable();
+      showMessage('Submission deleted successfully.', 'success');
+    } catch (err) {
+      console.error('Failed to delete submission:', err);
+      showMessage('Failed to delete submission. Please try again.', 'error');
+    } finally {
+      confirmDeleteBtn.disabled = false;
+      confirmDeleteBtn.textContent = 'Delete permanently';
+      closeConfirm();
+    }
+  }
+
+  // ---- Event wiring -----------------------------------------------------
+  refreshBtn.addEventListener('click', loadSubmissions);
+
+  tableBody.addEventListener('click', (e) => {
+    const viewBtn = e.target.closest('.view-btn');
+    if (viewBtn) {
+      openDetail(viewBtn.dataset.id);
+      return;
+    }
+    const deleteBtn = e.target.closest('.delete-btn');
+    if (deleteBtn) {
+      openConfirm(deleteBtn.dataset.id);
+    }
+  });
+
+  detailCloseBtn.addEventListener('click', closeDetail);
+  detailOverlay.addEventListener('click', (e) => {
+    if (e.target === detailOverlay) closeDetail();
+  });
+
+  confirmCancelBtn.addEventListener('click', closeConfirm);
+  confirmOverlay.addEventListener('click', (e) => {
+    if (e.target === confirmOverlay) closeConfirm();
+  });
+  confirmDeleteBtn.addEventListener('click', performDelete);
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      closeDetail();
+      closeConfirm();
+    }
+  });
+
+  // Initial load
+  loadSubmissions();
+</script>
+
+</body>
+</html>
