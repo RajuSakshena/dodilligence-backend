@@ -136,6 +136,7 @@ app.post('/api/submissions', async (req, res) => {
     }
 
     const {
+      id: clientId,
       org_name,
       registration_type,
       primary_role,
@@ -148,8 +149,24 @@ app.post('/api/submissions', async (req, res) => {
       confidentiality_accepted,
     } = body;
 
-    const id = crypto.randomUUID();
+    // The frontend generates one UUID per submission attempt and reuses
+    // it across cold-start retries. Validate it the same way we validate
+    // ids everywhere else; fall back to a server-generated id for
+    // callers that don't send one (e.g. curl/Postman, older clients).
+    let id;
+    if (clientId !== undefined && clientId !== null) {
+      if (!isValidUUID(clientId)) {
+        return res.status(400).json({ error: 'Invalid submission id (must be a UUID).' });
+      }
+      id = clientId;
+    } else {
+      id = crypto.randomUUID();
+    }
 
+    // ON CONFLICT (id) makes this idempotent: if a retry arrives with
+    // the same client-generated id as a request that already succeeded
+    // (but whose response was lost in transit), we don't insert a
+    // second row — we just touch updated_at and return the existing id.
     const rows = await sql.query(
       `INSERT INTO ${TABLE} (
          id,
@@ -167,6 +184,8 @@ app.post('/api/submissions', async (req, res) => {
          updated_at
        )
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, now(), now())
+       ON CONFLICT (id) DO UPDATE
+         SET updated_at = ${TABLE}.updated_at
        RETURNING id`,
       [
         id,
