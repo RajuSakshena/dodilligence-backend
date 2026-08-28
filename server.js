@@ -22,6 +22,8 @@ const defaultOrigins = [
   'http://127.0.0.1:5173',
   'http://localhost:8080',
   'http://127.0.0.1:8080',
+  'https://do-dilligence.vercel.app',
+  'https://dodilligence-backend.onrender.com',
 ];
 const envOrigins = (process.env.ALLOWED_ORIGINS || '')
   .split(',')
@@ -36,6 +38,8 @@ app.use(
       if (!origin || allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
+        // Log the rejected origin only — never log secrets (e.g. DATABASE_URL).
+        console.warn(`CORS rejected request from origin: ${origin}`);
         callback(new Error('Not allowed by CORS'));
       }
     },
