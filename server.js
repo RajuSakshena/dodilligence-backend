@@ -13,22 +13,22 @@ app.use(express.json());
 // -----------------------------------------------------------------------
 // CORS
 // -----------------------------------------------------------------------
-// Allow local Vite dev origins out of the box. Add your production
-// frontend URL here (or via the ALLOWED_ORIGINS env var, comma-separated)
-// once it's known, e.g.:
-//   ALLOWED_ORIGINS=https://myapp.com,https://www.myapp.com
+// Allow local development origins and the production frontend.
+// Additional origins can be supplied through ALLOWED_ORIGINS,
+// as a comma-separated environment variable.
 const defaultOrigins = [
   'http://localhost:5173',
   'http://127.0.0.1:5173',
   'http://localhost:8080',
   'http://127.0.0.1:8080',
   'https://do-dilligence.vercel.app',
-  'https://dodilligence-backend.onrender.com',
 ];
+
 const envOrigins = (process.env.ALLOWED_ORIGINS || '')
   .split(',')
   .map((o) => o.trim())
   .filter(Boolean);
+
 const allowedOrigins = [...defaultOrigins, ...envOrigins];
 
 app.use(
@@ -38,7 +38,7 @@ app.use(
       if (!origin || allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
-        // Log the rejected origin only — never log secrets (e.g. DATABASE_URL).
+        // Log the rejected origin only — never log secrets.
         console.warn(`CORS rejected request from origin: ${origin}`);
         callback(new Error('Not allowed by CORS'));
       }
@@ -97,7 +97,7 @@ function isValidUUID(value) {
 }
 
 // -----------------------------------------------------------------------
-// ⚠️  ADMIN ROUTES HAVE NO AUTHENTICATION — TEMPORARY / DEV-ONLY  ⚠️
+// ⚠️ ADMIN ROUTES HAVE NO AUTHENTICATION — TEMPORARY / DEV-ONLY ⚠️
 // -----------------------------------------------------------------------
 // At the caller's explicit request, requireAdminAuth and all Basic Auth
 // logic have been removed. GET/DELETE /api/admin/submissions and
@@ -105,27 +105,27 @@ function isValidUUID(value) {
 // guesses) the URL — no username, password, token, or session required.
 //
 // Concretely, that means:
-//   - Every field of every submission (org name, email, contact details,
-//     foreign-funding info, etc.) is publicly readable.
+//   - Every field of every submission is publicly readable.
 //   - Anyone can permanently delete any or all submissions.
 //
-// This should not be exposed on a public Render URL without re-adding
-// some form of access control first (Basic Auth, a shared-secret header,
-// IP allowlisting, etc.).
+// This should be secured with authentication before public production use.
 // -----------------------------------------------------------------------
+
 // -----------------------------------------------------------------------
 // Routes
 // -----------------------------------------------------------------------
 
-// Simple health check — handy for confirming the server + DB are up,
-// and useful once deployed on Render.
+// Simple health check — confirms that the server and database are available.
 app.get('/api/health', async (req, res) => {
   try {
     await sql.query('SELECT 1');
     res.json({ status: 'ok' });
   } catch (err) {
     console.error('Health check DB error:', err.message);
-    res.status(500).json({ status: 'error', error: 'Database unreachable' });
+    res.status(500).json({
+      status: 'error',
+      error: 'Database unreachable',
+    });
   }
 });
 
@@ -136,7 +136,9 @@ app.post('/api/submissions', async (req, res) => {
     const body = req.body;
 
     if (!body || typeof body !== 'object' || Array.isArray(body)) {
-      return res.status(400).json({ error: 'Request body must be a JSON object.' });
+      return res.status(400).json({
+        error: 'Request body must be a JSON object.',
+      });
     }
 
     const {
@@ -154,23 +156,26 @@ app.post('/api/submissions', async (req, res) => {
     } = body;
 
     // The frontend generates one UUID per submission attempt and reuses
-    // it across cold-start retries. Validate it the same way we validate
-    // ids everywhere else; fall back to a server-generated id for
-    // callers that don't send one (e.g. curl/Postman, older clients).
+    // it across retries. Validate it the same way we validate ids
+    // everywhere else; fall back to a server-generated id for callers
+    // that don't send one.
     let id;
+
     if (clientId !== undefined && clientId !== null) {
       if (!isValidUUID(clientId)) {
-        return res.status(400).json({ error: 'Invalid submission id (must be a UUID).' });
+        return res.status(400).json({
+          error: 'Invalid submission id (must be a UUID).',
+        });
       }
+
       id = clientId;
     } else {
       id = crypto.randomUUID();
     }
 
     // ON CONFLICT (id) makes this idempotent: if a retry arrives with
-    // the same client-generated id as a request that already succeeded
-    // (but whose response was lost in transit), we don't insert a
-    // second row — we just touch updated_at and return the existing id.
+    // the same client-generated id as a request that already succeeded,
+    // we don't insert a second row.
     const rows = await sql.query(
       `INSERT INTO ${TABLE} (
          id,
@@ -209,27 +214,35 @@ app.post('/api/submissions', async (req, res) => {
     return res.status(201).json({ id: rows[0].id });
   } catch (err) {
     console.error('POST /api/submissions error:', err.message);
-    return res.status(500).json({ error: 'Failed to create submission.' });
+    return res.status(500).json({
+      error: 'Failed to create submission.',
+    });
   }
 });
 
 // ---- 2. PATCH /api/submissions/:id -------------------------------------
-// Dynamically updates only the allowed columns present in the body.
 app.patch('/api/submissions/:id', async (req, res) => {
   try {
     const { id } = req.params;
 
     if (!isValidUUID(id)) {
-      return res.status(400).json({ error: 'Invalid submission id (must be a UUID).' });
+      return res.status(400).json({
+        error: 'Invalid submission id (must be a UUID).',
+      });
     }
 
     const body = req.body;
+
     if (!body || typeof body !== 'object' || Array.isArray(body)) {
-      return res.status(400).json({ error: 'Request body must be a JSON object.' });
+      return res.status(400).json({
+        error: 'Request body must be a JSON object.',
+      });
     }
 
     // Only keep keys that are real, patchable columns.
-    const keys = Object.keys(body).filter((key) => PATCHABLE_COLUMNS.has(key));
+    const keys = Object.keys(body).filter((key) =>
+      PATCHABLE_COLUMNS.has(key)
+    );
 
     if (keys.length === 0) {
       return res.status(400).json({
@@ -253,6 +266,7 @@ app.patch('/api/submissions/:id', async (req, res) => {
         setClauses.push(`${key} = $${paramIndex}`);
         values.push(value);
       }
+
       paramIndex += 1;
     }
 
@@ -261,6 +275,7 @@ app.patch('/api/submissions/:id', async (req, res) => {
 
     // Final parameter is the id, used in the WHERE clause.
     values.push(id);
+
     const idParamIndex = paramIndex;
 
     const query = `
@@ -273,13 +288,17 @@ app.patch('/api/submissions/:id', async (req, res) => {
     const rows = await sql.query(query, values);
 
     if (rows.length === 0) {
-      return res.status(404).json({ error: `No submission found with id ${id}.` });
+      return res.status(404).json({
+        error: `No submission found with id ${id}.`,
+      });
     }
 
     return res.json(rows[0]);
   } catch (err) {
     console.error('PATCH /api/submissions/:id error:', err.message);
-    return res.status(500).json({ error: 'Failed to update submission.' });
+    return res.status(500).json({
+      error: 'Failed to update submission.',
+    });
   }
 });
 
@@ -289,19 +308,28 @@ app.get('/api/submissions/:id', async (req, res) => {
     const { id } = req.params;
 
     if (!isValidUUID(id)) {
-      return res.status(400).json({ error: 'Invalid submission id (must be a UUID).' });
+      return res.status(400).json({
+        error: 'Invalid submission id (must be a UUID).',
+      });
     }
 
-    const rows = await sql.query(`SELECT * FROM ${TABLE} WHERE id = $1`, [id]);
+    const rows = await sql.query(
+      `SELECT * FROM ${TABLE} WHERE id = $1`,
+      [id]
+    );
 
     if (rows.length === 0) {
-      return res.status(404).json({ error: `No submission found with id ${id}.` });
+      return res.status(404).json({
+        error: `No submission found with id ${id}.`,
+      });
     }
 
     return res.json(rows[0]);
   } catch (err) {
     console.error('GET /api/submissions/:id error:', err.message);
-    return res.status(500).json({ error: 'Failed to fetch submission.' });
+    return res.status(500).json({
+      error: 'Failed to fetch submission.',
+    });
   }
 });
 
@@ -314,27 +342,30 @@ app.get('/api/submissions/:id', async (req, res) => {
 // -----------------------------------------------------------------------
 
 // ---- GET /api/admin/submissions ----------------------------------------
-// Returns every column for every row, newest first. PUBLIC — no auth.
 app.get('/api/admin/submissions', async (req, res) => {
   try {
     const rows = await sql.query(
       `SELECT * FROM ${TABLE} ORDER BY created_at DESC`
     );
+
     return res.json(rows);
   } catch (err) {
     console.error('GET /api/admin/submissions error:', err.message);
-    return res.status(500).json({ error: 'Failed to fetch submissions.' });
+    return res.status(500).json({
+      error: 'Failed to fetch submissions.',
+    });
   }
 });
 
 // ---- DELETE /api/admin/submissions/:id ----------------------------------
-// Permanently deletes one row by UUID. PUBLIC — no auth.
 app.delete('/api/admin/submissions/:id', async (req, res) => {
   try {
     const { id } = req.params;
 
     if (!isValidUUID(id)) {
-      return res.status(400).json({ error: 'Invalid submission id (must be a UUID).' });
+      return res.status(400).json({
+        error: 'Invalid submission id (must be a UUID).',
+      });
     }
 
     const rows = await sql.query(
@@ -343,19 +374,24 @@ app.delete('/api/admin/submissions/:id', async (req, res) => {
     );
 
     if (rows.length === 0) {
-      return res.status(404).json({ error: `No submission found with id ${id}.` });
+      return res.status(404).json({
+        error: `No submission found with id ${id}.`,
+      });
     }
 
-    return res.json({ success: true, deletedId: rows[0].id });
+    return res.json({
+      success: true,
+      deletedId: rows[0].id,
+    });
   } catch (err) {
     console.error('DELETE /api/admin/submissions/:id error:', err.message);
-    return res.status(500).json({ error: 'Failed to delete submission.' });
+    return res.status(500).json({
+      error: 'Failed to delete submission.',
+    });
   }
 });
 
 // ---- GET /management.html -----------------------------------------------
-// The admin dashboard itself. PUBLIC — no auth. Anyone with this URL can
-// view and delete every submission.
 app.get('/management.html', (req, res) => {
   res.sendFile(path.join(__dirname, 'management.html'));
 });
@@ -364,24 +400,32 @@ app.get('/management.html', (req, res) => {
 // 404 fallback for unknown routes
 // -----------------------------------------------------------------------
 app.use((req, res) => {
-  res.status(404).json({ error: 'Route not found.' });
+  res.status(404).json({
+    error: 'Route not found.',
+  });
 });
 
 // -----------------------------------------------------------------------
-// Central error handler (e.g. CORS rejection, malformed JSON body)
+// Central error handler
 // -----------------------------------------------------------------------
 app.use((err, req, res, next) => {
   console.error('Unhandled error:', err.message);
 
   if (err.message === 'Not allowed by CORS') {
-    return res.status(403).json({ error: 'Origin not allowed by CORS policy.' });
+    return res.status(403).json({
+      error: 'Origin not allowed by CORS policy.',
+    });
   }
 
   if (err.type === 'entity.parse.failed') {
-    return res.status(400).json({ error: 'Invalid JSON in request body.' });
+    return res.status(400).json({
+      error: 'Invalid JSON in request body.',
+    });
   }
 
-  return res.status(500).json({ error: 'Internal server error.' });
+  return res.status(500).json({
+    error: 'Internal server error.',
+  });
 });
 
 // -----------------------------------------------------------------------
