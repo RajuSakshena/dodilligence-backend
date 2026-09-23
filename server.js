@@ -21,30 +21,47 @@ const defaultOrigins = [
   'http://127.0.0.1:5173',
   'http://localhost:8080',
   'http://127.0.0.1:8080',
+  // Production frontend (correct spelling: "dodiligence", single "l")
+  'https://dodiligence-frontend.vercel.app',
+  // Old spelling kept as a fallback in case that domain is also used
   'https://dodilligence-frontend.vercel.app',
 ];
 
 const envOrigins = (process.env.ALLOWED_ORIGINS || '')
   .split(',')
-  .map((o) => o.trim())
+  .map((o) => o.trim().replace(/\/$/, '')) // strip trailing slash
   .filter(Boolean);
 
 const allowedOrigins = [...defaultOrigins, ...envOrigins];
 
-app.use(
-  cors({
-    origin(origin, callback) {
-      // Allow non-browser requests (no Origin header, e.g. curl/Postman)
-      if (!origin || allowedOrigins.includes(origin)) {
-        callback(null, true);
-      } else {
-        // Log the rejected origin only — never log secrets.
-        console.warn(`CORS rejected request from origin: ${origin}`);
-        callback(new Error('Not allowed by CORS'));
-      }
-    },
-  })
-);
+// Vercel preview deployments of the frontend, e.g.
+// https://dodiligence-frontend-git-main-xyz.vercel.app
+const vercelPreviewRegex =
+  /^https:\/\/dodiligence-frontend(-[a-z0-9-]+)?\.vercel\.app$/i;
+
+const corsOptions = {
+  origin(origin, callback) {
+    // Allow non-browser requests (no Origin header, e.g. curl/Postman)
+    if (
+      !origin ||
+      allowedOrigins.includes(origin) ||
+      vercelPreviewRegex.test(origin)
+    ) {
+      callback(null, true);
+    } else {
+      // Log the rejected origin only — never log secrets.
+      console.warn(`CORS rejected request from origin: ${origin}`);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  optionsSuccessStatus: 204,
+};
+
+app.use(cors(corsOptions));
+// Explicitly answer preflight requests for every route.
+app.options('*', cors(corsOptions));
 
 // -----------------------------------------------------------------------
 // Constants: the ONLY table and ONLY columns the backend is allowed to touch
@@ -431,8 +448,14 @@ app.use((err, req, res, next) => {
 // -----------------------------------------------------------------------
 // Start server
 // -----------------------------------------------------------------------
+// On Vercel (serverless) the app must be exported, not listened on.
+// Locally / on other hosts (Render, Railway, etc.) we start a normal server.
 const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Backend server listening on port ${PORT}`);
-});
+if (!process.env.VERCEL) {
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Backend server listening on port ${PORT}`);
+  });
+}
+
+module.exports = app;
