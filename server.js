@@ -21,7 +21,7 @@ const defaultOrigins = [
   'http://127.0.0.1:5173',
   'http://localhost:8080',
   'http://127.0.0.1:8080',
-  'https://do-dilligence.vercel.app',
+  'https://dodilligence-frontend.vercel.app',
 ];
 
 const envOrigins = (process.env.ALLOWED_ORIGINS || '')
